@@ -75,4 +75,4 @@ if __name__ == "__main__":
     result = search_place(search_query)
 
     # if result:
-    #     print("\n반환된 데이터:", result)
+    #     print("\n반환된 데이터:", result) .
