@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 
 """
 현재 폴더에 있는 모든 PDF 파일에서 테이블을 추출하여,
