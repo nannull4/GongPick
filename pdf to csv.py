@@ -111,7 +111,7 @@ if __name__ == '__main__':
             os.makedirs(output_directory)
             print(f"📁 '{output_directory}' 폴더를 생성했습니다.")
         
-        # 찾은 모든 PDF 파일에 대해 변환 함수를 실행합니다.
+        # 찾은 모든 PDF 파일에 대해 변환 함수를 실행합니다..
         for pdf_file in pdf_files:
             convert_pdf_to_csvs_by_page(pdf_file, output_directory)
         
