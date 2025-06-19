@@ -74,5 +74,5 @@ def search_place(query):
     return None
 
 if __name__ == "__main__":
-    search_query = "서울시청" 
+    search_query = "기절초풍왕순대 낙성대점" 
     result = search_place(search_query)
