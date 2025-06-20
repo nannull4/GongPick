@@ -1,0 +1,15 @@
+name: gongpick-env
+channels:
+  - defaults
+  - pytorch
+dependencies:
+  - python=3.11
+  - pip
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pip:
+      - streamlit
+      - transformers
+      - scikit-learn
+      - pandas
