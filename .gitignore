@@ -5,3 +5,4 @@
 # .env 파일은 Git 히스토리에 포함하지 않음
 .env
 output_csvs
+/data
