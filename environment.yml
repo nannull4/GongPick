@@ -1,0 +1,19 @@
+name: gongpick-env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - python-dotenv
+      - requests
+      - tabula-py
+      - PyMuPDF
+      - scikit-learn
+      - pandas
+      - numpy
+      - matplotlib
+      - seaborn
+      - fitz  # PyMuPDF는 pip로 설치해야 함
+      - ipykernel
