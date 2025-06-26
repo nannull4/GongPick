@@ -328,11 +328,18 @@ if menu == "홈":
                             
                             if not predicted_place_row.empty:
                                 predicted_place_row = predicted_place_row.iloc[0]
+                                # 위경도 정보가 있는지 확인
+                                if 'lat' in predicted_place_row and 'lon' in predicted_place_row:
+                                    lat, lon = predicted_place_row['lat'], predicted_place_row['lon']
+                                else:
+                                    # 기본 위치 설정 (서울 시청)
+                                    lat, lon = 37.5665, 126.9780
+                                
                                 st.session_state.predicted_place_info = {
                                     "name": predicted_place_row['사용장소'],
                                     "address": f"서울 {predicted_place_row['구']} (예시 주소)",
-                                    "lat": predicted_place_row['lat'],
-                                    "lon": predicted_place_row['lon'],
+                                    "lat": lat,
+                                    "lon": lon,
                                     "people_rec": "최대 10명",
                                     "cost_per_person": predicted_place_row['1인당비용'],
                                     "category": predicted_place_row['업종 중분류']
@@ -393,9 +400,15 @@ if menu == "홈":
                                     sel = st.session_state.similar_places_info[st.session_state.selected_similar]
                                     st.markdown("### 📍 선택한 장소 위치")
                                     st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
-                                    m2 = folium.Map(location=[sel["lat"], sel["lon"]], zoom_start=17)
+                                    # 위경도 정보 확인
+                                    if 'lat' in sel and 'lon' in sel:
+                                        sel_lat, sel_lon = sel["lat"], sel["lon"]
+                                    else:
+                                        sel_lat, sel_lon = 37.5665, 126.9780  # 기본 위치
+                                    
+                                    m2 = folium.Map(location=[sel_lat, sel_lon], zoom_start=17)
                                     folium.Marker(
-                                        location=[sel["lat"], sel["lon"]],
+                                        location=[sel_lat, sel_lon],
                                         popup=sel["사용장소"],
                                         tooltip=f"{sel['사용장소']} ({sel['구']})",
                                         icon=folium.Icon(color="orange", icon="star", prefix="fa")
@@ -418,7 +431,7 @@ if menu == "홈":
         </div>
         """, unsafe_allow_html=True)
 
-# === 메뉴결정 (기존 코드 유지) ===
+# === 메뉴결정 ===
 elif menu == "메뉴결정":
     st.title("🍱 공무원 현지 맛집 추천")
     if st.session_state.show_input:
@@ -442,18 +455,18 @@ elif menu == "메뉴결정":
                     "구": district
                 }
                 query_df = pd.DataFrame([query_row])
-
+ 
                 # 2) 예측
                 proba = pipeline.predict_proba(query_df)
                 idx   = proba.argmax()
                 place = pipeline.classes_[idx]
                 conf  = proba[0][idx]
-
+ 
                 # 3) 같은 업종 중분류 내 유사 장소 3개
                 sim_places = (raw_df[(raw_df["업종 중분류"] == category)
                                     & (raw_df["사용장소"] != place)]
                             ["사용장소"].value_counts().head(3).index.tolist())
-
+ 
                 # 4) 세션에 저장하고 결과표시로 전환
                 st.session_state.show_input = False
                 st.session_state.query = {**query_row,
@@ -462,23 +475,26 @@ elif menu == "메뉴결정":
                                         "sim_places": sim_places}
     else:
         q = st.session_state.query
-
+ 
         st.success(f"✅ {q['구']} · {q['업종 중분류']} · {q['인원']}명 기준 추천")
-
+ 
         # ── 지도: 원본 데이터에 위·경도 컬럼이 있다면 활용 ──
-        loc_row = raw_df[raw_df["사용장소"] == q["pred_place"]]
-        if not loc_row.empty and {"위도", "경도"}.issubset(loc_row.columns):
-            lat, lon = loc_row.iloc[0]["위도"], loc_row.iloc[0]["경도"]
+        if raw_df is not None:
+            loc_row = raw_df[raw_df["사용장소"] == q["pred_place"]]
+            if not loc_row.empty and {"위도", "경도"}.issubset(loc_row.columns):
+                lat, lon = loc_row.iloc[0]["위도"], loc_row.iloc[0]["경도"]
+            else:
+                lat, lon = 37.5665, 126.9780      # 위·경도 없으면 서울 시청 기준
         else:
-            lat, lon = 37.5665, 126.9780      # 위·경도 없으면 서울 시청 기준
-
+            lat, lon = 37.5665, 126.9780
+ 
         m = folium.Map(location=[lat, lon], zoom_start=15)
         folium.Marker([lat, lon],
                     popup=q["pred_place"],
                     tooltip=f"{q['pred_place']} ({q['pred_conf']:.0%})",
                     icon=folium.Icon(color="red")).add_to(m)
         st_folium(m, width=800, height=500)
-
+ 
         # ── 상세 정보 ──
         st.markdown(f"""
         ### 🍽 추천 맛집: **{q['pred_place']}**
@@ -489,21 +505,20 @@ elif menu == "메뉴결정":
         - ⏰ {q['계절']} · {q['점저']}
         - ⭐ 업종: {q['업종 중분류']}
         """)
-
+ 
         # ── 유사 장소 ──
         if q["sim_places"]:
             st.markdown("#### 🔍 비슷한 장소")
             for p in q["sim_places"]:
                 st.write("•", p)
-
+ 
         if st.button("🔄 검색 조건 다시 입력하기"):
             st.session_state.show_input = True
-            st.rerun()
-
+ 
 # === 지도 보기 ===
 elif menu == "지도 보기":
     st.title("🗺️ 현재 위치 보기")
-    current_location = [37.5665, 126.9780] # 서울 시청 기준
+    current_location = [37.5665, 126.9780]
     m = folium.Map(location=current_location, zoom_start=13)
     folium.Marker(
         location=current_location,
@@ -511,14 +526,14 @@ elif menu == "지도 보기":
         icon=folium.Icon(color="blue", icon="info-sign")
     ).add_to(m)
     st_folium(m, width=900, height=550)
-
+ 
 # === 이용 가이드 ===
 elif menu == "이용 가이드":
     st.title("📘 이용 가이드")
     st.markdown("""
-    1. 좌측 메뉴에서 '홈' 선택 ➡️ 챗봇을 통해 자유롭게 질문하여 추천받기
-    2. 좌측 메뉴에서 '메뉴결정' 선택 ➡️ 정해진 조건으로 세부적인 맛집 추천받기
-    3. '지도 보기'에서 현재 설정된 기본 위치 확인
-    4. 추천된 장소의 정보와 지도 시각화를 통해 결정하기
+    1. 좌측 메뉴에서 참고 질문 선택  
+    2. 조건 입력 후 '질문하기' 또는 '맛집 추천 검색' 클릭  
+    3. 추천된 장소 확인 + 지도 시각화  
     """)
 
+    
