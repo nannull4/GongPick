@@ -1,8 +1,27 @@
 
 import streamlit as st
 from PIL import Image
+from pathlib import Path 
 import folium
 from streamlit_folium import st_folium
+import os, joblib, pandas as pd           # ← 추가
+from dotenv import load_dotenv 
+
+BASE_DIR   = Path(__file__).resolve().parents[1]      # GongPick/
+MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "outputs" / "gongpick.pkl"))
+RAW_PATH   = Path(os.getenv("RAW_DATA_PATH", BASE_DIR / "data" / "raw" / "프렌차이즈_구추출_결과 1.csv"))
+
+@st.cache_resource(show_spinner=False)
+def load_resources():
+    model = joblib.load(MODEL_PATH)
+    raw   = pd.read_csv(RAW_PATH, encoding="utf-8")
+    return model, raw
+
+pipeline, raw_df = load_resources()
+
+# ───────── 로고 경로 (수정) ─────────
+APP_DIR  = Path(__file__).resolve().parent              # app/
+LOGO_PATH = APP_DIR / "logo" / "gongpicklogo.png" 
 
 # 페이지 설정 (반드시 최상단에서 호출)
 st.set_page_config(page_title="공무원 맛집 추천 시스템", layout="wide")
@@ -23,7 +42,7 @@ if "query" not in st.session_state:
 
 # === 사이드바 ===
 with st.sidebar:
-    logo = Image.open("../GongPick/app/logo/gongpicklogo.png")
+    logo = Image.open(LOGO_PATH)     
     st.image(logo, use_column_width=True)
     st.markdown("<p style='color: rgba(128, 144, 182, 1); font-weight: bold;'>공무원들의 믿을만한 Pick!</p>", unsafe_allow_html=True)
     st.markdown("#### 오늘의 업무도 맛있게!")
@@ -162,33 +181,70 @@ elif menu == "메뉴결정":
             people_count = st.number_input("👥 인원 수", min_value=1, value=1, step=1)
             submitted = st.form_submit_button("🔎 맛집 추천 검색")
             if submitted:
-                st.session_state.show_input = False
-                st.session_state.query = {
+                # 1) 사용자가 입력한 값을 모델 feature와 같은 컬럼명으로 변환
+                query_row = {
                     "인원": people_count,
                     "계절": season,
-                    "시간대": time_slot,
-                    "1인당 비용": cost,
+                    "점저": time_slot,              # ⚠️ 학습 컬럼명이 '점저' 였죠!
+                    "1인당비용": int(cost),
                     "업종 중분류": category,
                     "구": district
                 }
+                query_df = pd.DataFrame([query_row])
+
+                # 2) 예측
+                proba = pipeline.predict_proba(query_df)
+                idx   = proba.argmax()
+                place = pipeline.classes_[idx]
+                conf  = proba[0][idx]
+
+                # 3) 같은 업종 중분류 내 유사 장소 3개
+                sim_places = (raw_df[(raw_df["업종 중분류"] == category)
+                                    & (raw_df["사용장소"] != place)]
+                            ["사용장소"].value_counts().head(3).index.tolist())
+
+                # 4) 세션에 저장하고 결과표시로 전환
+                st.session_state.show_input = False
+                st.session_state.query = {**query_row,
+                                        "pred_place": place,
+                                        "pred_conf": conf,
+                                        "sim_places": sim_places}
     else:
         q = st.session_state.query
-        st.success(f"✅ '{q['구']}'에서 '{q['업종 중분류']}' 업종으로 {q['인원']}명 기준 추천 맛집")
-        m = folium.Map(location=[37.5665, 126.9780], zoom_start=13)
-        folium.Marker(
-            [37.5665, 126.9780],
-            popup="신의주찹쌀순대 - 점심에 딱!",
-            tooltip="추천 맛집"
-        ).add_to(m)
+
+        st.success(f"✅ {q['구']} · {q['업종 중분류']} · {q['인원']}명 기준 추천")
+
+        # ── 지도: 원본 데이터에 위·경도 컬럼이 있다면 활용 ──
+        loc_row = raw_df[raw_df["사용장소"] == q["pred_place"]]
+        if not loc_row.empty and {"위도", "경도"}.issubset(loc_row.columns):
+            lat, lon = loc_row.iloc[0]["위도"], loc_row.iloc[0]["경도"]
+        else:
+            lat, lon = 37.5665, 126.9780      # 위·경도 없으면 서울 시청 기준
+
+        m = folium.Map(location=[lat, lon], zoom_start=15)
+        folium.Marker([lat, lon],
+                    popup=q["pred_place"],
+                    tooltip=f"{q['pred_place']} ({q['pred_conf']:.0%})",
+                    icon=folium.Icon(color="red")).add_to(m)
         st_folium(m, width=800, height=500)
+
+        # ── 상세 정보 ──
         st.markdown(f"""
-        ### 🍽 추천 맛집: 신의주찹쌀순대
-        - 📍 주소 (구): {q['구']}
+        ### 🍽 추천 맛집: **{q['pred_place']}**
+        - 🔮 신뢰도: **{q['pred_conf']:.0%}**
+        - 📍 구: {q['구']}
         - 👥 인원: {q['인원']}
-        - 💰 비용: {q['1인당 비용']}
-        - ⏰ 시간: {q['시간대']} / {q['계절']}
-        - 🍽 업종: {q['업종 중분류']}
+        - 💰 1인당 비용: {q['1인당비용']}원
+        - ⏰ {q['계절']} · {q['점저']}
+        - ⭐ 업종: {q['업종 중분류']}
         """)
+
+        # ── 유사 장소 ──
+        if q["sim_places"]:
+            st.markdown("#### 🔍 비슷한 장소")
+            for p in q["sim_places"]:
+                st.write("•", p)
+
         if st.button("🔄 검색 조건 다시 입력하기"):
             st.session_state.show_input = True
 
