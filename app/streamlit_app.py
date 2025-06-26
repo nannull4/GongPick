@@ -1,11 +1,15 @@
-
 import streamlit as st
 from PIL import Image
 from pathlib import Path 
 import folium
 from streamlit_folium import st_folium
-import os, joblib, pandas as pd           # ← 추가
+import os, joblib, pandas as pd
 from dotenv import load_dotenv 
+from openai import AzureOpenAI
+import json
+
+# 환경변수 로드
+load_dotenv()
 
 BASE_DIR   = Path(__file__).resolve().parents[1]      # GongPick/
 MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "outputs" / "gongpick.pkl"))
@@ -13,17 +17,168 @@ RAW_PATH   = Path(os.getenv("RAW_DATA_PATH", BASE_DIR / "data" / "raw" / "프렌
 
 @st.cache_resource(show_spinner=False)
 def load_resources():
-    model = joblib.load(MODEL_PATH)
-    raw   = pd.read_csv(RAW_PATH, encoding="utf-8")
-    return model, raw
+    try:
+        # 환경변수 기반 경로 우선, 없으면 기본 경로 사용
+        model_path = MODEL_PATH if MODEL_PATH.exists() else Path("ML_model.pkl")
+        model = joblib.load(model_path)
+        
+        # 원본 데이터 로드 (있는 경우)
+        raw = None
+        if RAW_PATH.exists():
+            raw = pd.read_csv(RAW_PATH, encoding="utf-8")
+        
+        return model, raw
+    except FileNotFoundError as e:
+        st.error(f"모델 파일을 찾을 수 없습니다: {e}")
+        st.stop()
+    except Exception as e:
+        st.error(f"리소스 로드 중 오류 발생: {e}")
+        st.stop()
 
 pipeline, raw_df = load_resources()
 
-# ───────── 로고 경로 (수정) ─────────
+# ───────── 로고 경로 ─────────
 APP_DIR  = Path(__file__).resolve().parent              # app/
 LOGO_PATH = APP_DIR / "logo" / "gongpicklogo.png" 
 
-# 페이지 설정 (반드시 최상단에서 호출)
+# --- Azure OpenAI 설정 ---
+azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+azure_openai_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+your_deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
+
+# AzureOpenAI 클라이언트 초기화
+try:
+    client = AzureOpenAI(
+        api_key=azure_openai_api_key,
+        azure_endpoint=azure_openai_endpoint,
+        api_version=azure_openai_api_version
+    )
+    st.success("Azure OpenAI 클라이언트가 성공적으로 초기화되었습니다.")
+except Exception as e:
+    st.error(f"Azure OpenAI 클라이언트 초기화 오류: {e}")
+    st.stop()
+
+# --- 시스템 프롬프트 정의 ---
+system_prompt_content = """
+You are an AI assistant designed to extract dining preferences from user queries and format them into a structured JSON object.
+Your primary goal is to **always output a JSON object** following the specified schema.
+You must not provide any additional conversational text, explanations, or deviations from this JSON format.
+
+**JSON Output Format:**
+
+```json
+{
+    "인원": [Integer],
+    "계절": [String, e.g., "봄", "여름", "가을", "겨울"],
+    "점저": [String, e.g., "점심", "저녁"],
+    "1인당비용": [Integer],
+    "업종 중분류": [String, e.g., "한식", "양식", "중식", "일식", "카페/디저트", "술집", "치킨", "분식", "패스트푸드" 등 구체적인 음식/업종 카테고리],
+    "구": [String, e.g., "강남구", "마포구", "중구", "종로구", "서초구", "영등포구" 등 대한민국 서울특별시 및 주요 도시의 실제 '구' 이름. 만약 '구' 정보가 명확하지 않거나 대한민국이 아닌 지역이 언급되면, 사용자에게 직접 묻거나 가장 합리적인 서울/경기권 '구'로 가정합니다.]
+}
+```
+
+**Instructions for Populating the JSON Fields:**
+
+* **인원 (Participants):**
+    * Extract the number of people directly mentioned.
+    * If not explicitly stated, infer based on common phrases (e.g., "혼자" -> 1, "둘이서" -> 2, "팀원들" -> 문맥상 파악 가능한 인원 또는 합리적인 기본값).
+    * If no clear number is inferable, default to `1`.
+* **계절 (Season):**
+    * Always determine the current season based on the current date. (현재는 여름으로 설정).
+* **점저 (Meal Time):**
+    * Determine if the user is referring to "점심" (lunch) or "저녁" (dinner) based on keywords like "점심", "저녁", "회식", "퇴근 후", "아침" (이 경우 점심 또는 저녁으로 변환).
+    * If ambiguous, default to "저녁".
+* **1인당비용 (Cost per Person):**
+    * Calculate this by dividing the total budget by the number of people.
+    * If a total budget is given without the number of people, use the inferred number of people.
+    * If neither total budget nor explicit cost per person is given, infer a reasonable cost per person based on the `업종 중분류` (e.g., 치킨/분식은 저렴하게, 양식/일식은 높게).
+* **업종 중분류 (Cuisine/Category):**
+    * Identify the most specific type of cuisine or establishment mentioned (e.g., "한식", "양식", "중식", "일식", "카페/디저트", "술집", "치킨", "피자", "분식", "패스트푸드").
+    * Be flexible with synonyms and general terms.
+    * If no specific type is mentioned, try to infer from the context (e.g., "밥 먹자" -> "한식"). If still unclear, default to "한식".
+* **구 (District):**
+    * Extract the specific '구' name (e.g., "강남구", "마포구", "중구").
+    * **CRITICAL:** If the user mentions a location outside of South Korea (e.g., "미국", "중국", "뉴욕", "신주쿠구") or a clearly non-existent district, still extract what they said into the `구` field. **DO NOT** output a "service not supported" message from the LLM. The downstream application will handle this validation.
+    * If no district is mentioned, assume a reasonable default based on common activity (e.g., "중구" 또는 "강남구" 등 서울의 중심지).
+
+**Example Scenarios:**
+
+* **Scenario 1 (Normal):**
+    * **User Input:** "나는 마포구에서 회사를 다니는 직장인이야 오늘 저녁에 팀원 8명과 중식집에서 총 30만원 이내로 회식을 하려고 해"
+    * **Expected Output:**
+        ```json
+        {
+            "인원": 8,
+            "계절": "여름",
+            "점저": "저녁",
+            "1인당비용": 37500,
+            "업종 중분류": "중식",
+            "구": "마포구"
+        }
+        ```
+* **Scenario 2 (Ambiguous/Missing Info):**
+    * **User Input:** "오늘 점심 뭐 먹지?"
+    * **Expected Output (assuming 1인당비용은 문맥상 합리적으로 추론):**
+        ```json
+        {
+            "인원": 1,
+            "계절": "여름",
+            "점저": "점심",
+            "1인당비용": 10000,
+            "업종 중분류": "한식",
+            "구": "중구"
+        }
+        ```
+* **Scenario 3 (Foreign District - LLM still extracts it):**
+    * **User Input:** "도쿄 신주쿠구에서 맛있는 라멘집 알려줘"
+    * **Expected Output:**
+        ```json
+        {
+            "인원": 1,
+            "계절": "여름",
+            "점저": "저녁",
+            "1인당비용": 15000,
+            "업종 중분류": "일식",
+            "구": "신주쿠구"
+        }
+        ```
+"""
+
+# --- 서비스 지원 지역 리스트 ---
+valid_korean_districts = [
+    "강남구", "마포구", "중구", "종로구", "서초구", "영등포구", "관악구", "동작구", "성동구", 
+    "송파구", "강서구", "노원구", "동대문구", "은평구", "서대문구", "성북구", "용산구", 
+    "양천구", "도봉구", "구로구", "금천구", "중랑구", "강북구", "광진구"
+]
+
+# --- 예시 데이터프레임 초기화 ---
+def initialize_sample_data():
+    """샘플 데이터 초기화 (실제 데이터가 없는 경우)"""
+    return pd.DataFrame({
+        "인원": [1, 2, 4, 8, 2, 1, 3, 5, 2, 6, 1],
+        "계절": ["여름", "여름", "여름", "여름", "가을", "겨울", "여름", "봄", "여름", "가을", "겨울"],
+        "점저": ["점심", "저녁", "저녁", "저녁", "저녁", "점심", "점심", "점심", "저녁", "저녁", "점심"],
+        "1인당비용": [15000, 50000, 25000, 37500, 45000, 10000, 12000, 18000, 30000, 22000, 8000],
+        "업종 중분류": ["한식", "양식", "중식", "중식", "일식", "한식", "치킨", "한식", "양식", "한식", "분식"],
+        "구": ["중구", "중구", "마포구", "마포구", "강남구", "종로구", "마포구", "영등포구", "강남구", "마포구", "중구"],
+        "사용장소": [
+            "명동칼국수", "이태원 비스트로", "연남동 중식당", "공덕 회관", 
+            "강남 스시집", "종로 설렁탕", "홍대 치킨집", "여의도 부대찌개",
+            "청담 이탈리안", "합정 삼겹살하우스", "시청 김밥천국"
+        ],
+        "lat": [37.5630, 37.5348, 37.5580, 37.5450, 37.5170, 37.5700, 37.5560, 37.5210, 37.5250, 37.5502, 37.5650], 
+        "lon": [126.9800, 126.9920, 126.9360, 126.9480, 127.0200, 126.9890, 126.9230, 126.9380, 127.0450, 126.9149, 126.9770]
+    })
+
+# 데이터프레임 초기화
+if 'df' not in st.session_state:
+    if raw_df is not None:
+        st.session_state.df = raw_df
+    else:
+        st.session_state.df = initialize_sample_data()
+
+# --- 페이지 설정 ---
 st.set_page_config(page_title="공무원 맛집 추천 시스템", layout="wide")
 
 # 초기 세션 상태 설정
@@ -39,11 +194,20 @@ if "show_input" not in st.session_state:
     st.session_state.show_input = True
 if "query" not in st.session_state:
     st.session_state.query = {}
+if "llm_parsed_data" not in st.session_state:
+    st.session_state.llm_parsed_data = {}
+if "predicted_place_info" not in st.session_state:
+    st.session_state.predicted_place_info = {}
+if "similar_places_info" not in st.session_state:
+    st.session_state.similar_places_info = []
 
 # === 사이드바 ===
 with st.sidebar:
-    logo = Image.open(LOGO_PATH)     
-    st.image(logo, use_column_width=True)
+    if LOGO_PATH.exists():
+        logo = Image.open(LOGO_PATH)     
+        st.image(logo, use_column_width=True)
+    else:
+        st.markdown("### 🍽️ GongPick")
     st.markdown("<p style='color: rgba(128, 144, 182, 1); font-weight: bold;'>공무원들의 믿을만한 Pick!</p>", unsafe_allow_html=True)
     st.markdown("#### 오늘의 업무도 맛있게!")
     menu = st.radio("📋 메뉴", ["홈", "메뉴결정", "지도 보기", "이용 가이드"], index=0)
@@ -90,7 +254,7 @@ if menu == "홈":
                 st.session_state.show_response = True
                 st.rerun()
 
-    else:
+    else: # 질문 제출 후
         st.markdown("---")
         if st.button("🔄 다시 질문하기"):
             st.session_state.show_response = False
@@ -99,67 +263,154 @@ if menu == "홈":
         st.markdown("### 💬 답변")
         st.markdown(f"**'{st.session_state.last_query}'에 대한 추천 결과입니다.**")
 
-        st.markdown("#### 🍽️ 추천 맛집: 삼겹살하우스")
-        st.markdown("""
-        - 📍 주소: 서울 마포구 합정동 123-45  
-        - 👥 인원 추천: 최대 10명  
-        - 💰 인당 예산: 12000원  
-        - ⭐ 업종: 한식
-        """)
+        # --- LLM 및 ML 모델 로직 ---
+        with st.spinner("LLM으로 정보 추출 및 ML 모델로 추천 맛집 찾는 중..."):
+            try:
+                # LLM Chat Completion 요청
+                response = client.chat.completions.create(
+                    model=your_deployment_name,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": [{"type": "text", "text": system_prompt_content}]
+                        },
+                        {"role": "user", "content": st.session_state.last_query}
+                    ],
+                    max_tokens=200,
+                    response_format={"type": "json_object"}
+                )
 
-        m = folium.Map(location=[37.5502, 126.9149], zoom_start=17)
-        folium.Marker(
-            location=[37.5502, 126.9149],
-            tooltip="삼겹살하우스 🍖",
-            popup="서울 마포구 합정동 123-45",
-            icon=folium.Icon(color="red", icon="cutlery", prefix="fa")
-        ).add_to(m)
-        st_folium(m, width=1000, height=600)
+                llm_output_json_str = response.choices[0].message.content
+                model_input_data = json.loads(llm_output_json_str)
+                st.session_state.llm_parsed_data = model_input_data
 
-        st.markdown("### 🔍 비슷한 장소 추천")
-        similar = [
-            {"name": "고기짱짱집", "loc": "서울 마포구 성산동 12-34", "emoji": "🥩", "price": "13,000원", "lat": 37.5532, "lon": 126.9175},
-            {"name": "합정돼지불백", "loc": "서울 마포구 양화로 22길", "emoji": "🍖", "price": "11,000원", "lat": 37.5491, "lon": 126.9130},
-            {"name": "고기나라", "loc": "서울 마포구 홍익로 5길", "emoji": "🍱", "price": "12,500원", "lat": 37.5520, "lon": 126.9210},
-        ]
+                # 서비스 미지원 지역 검사
+                extracted_gu = model_input_data.get("구")
 
-        sim_cols = st.columns(3)
-        for i, col in enumerate(sim_cols):
-            selected = (st.session_state.selected_similar == i)
-            background = "#ffe6e6" if selected else "#f9f9f9"
-            border = "2px solid #ff4d4d" if selected else "1px solid #ddd"
-            with col:
-                if st.button(f"{similar[i]['emoji']} {similar[i]['name']}", key=f"sim_{i}"):
-                    st.session_state.selected_similar = i
-                    st.rerun()
-                st.markdown(f"""
-                <div style='border:{border}; border-radius:10px; padding:15px; background-color:{background};'>
-                    <p style='margin:0;'>📍 {similar[i]['loc']}</p>
-                    <p style='margin:0;'>💰 {similar[i]['price']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                if extracted_gu and extracted_gu not in valid_korean_districts:
+                    st.error(f"🚨 서비스 미지원 지역입니다: **'{extracted_gu}'**.\n\n"
+                             "대한민국 서울특별시 내의 '구' 단위 지역만 지원됩니다. 다시 질문해주세요.")
+                    st.session_state.predicted_place_info = {}
+                    st.session_state.similar_places_info = []
+                else:
+                    st.success(f"✅ '{extracted_gu}'는 지원되는 지역입니다. ML 모델 예측을 시작합니다.")
+                    
+                    # ML 모델 입력 데이터 준비 및 예측
+                    feature_columns = ["인원", "계절", "점저", "1인당비용", "업종 중분류", "구"]
+                    
+                    if not all(field in model_input_data for field in feature_columns):
+                        st.error("LLM 출력에 ML 모델 예측에 필요한 필수 필드가 누락되었습니다. 다시 질문해주세요.")
+                        st.session_state.predicted_place_info = {}
+                        st.session_state.similar_places_info = []
+                    else:
+                        # 숫자형 필드 타입 변환
+                        try:
+                            model_input_data["인원"] = int(model_input_data["인원"])
+                            model_input_data["1인당비용"] = int(model_input_data["1인당비용"])
+                        except ValueError:
+                            st.error("LLM이 반환한 '인원' 또는 '1인당비용' 값이 유효한 숫자가 아닙니다. 다시 질문해주세요.")
+                            st.session_state.predicted_place_info = {}
+                            st.session_state.similar_places_info = []
+                            st.stop()
 
-        if st.session_state.selected_similar is not None:
-            st.markdown("""
-            <script>
-            const similarMap = document.getElementById('similar_map');
-            if (similarMap) {
-                similarMap.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-            </script>
-            """, unsafe_allow_html=True)
+                        # ML 모델에 전달할 DataFrame 생성
+                        example = pd.DataFrame([model_input_data], columns=feature_columns)
+                        
+                        try:
+                            predicted_probs = pipeline.predict_proba(example)
+                            predicted_class_index = predicted_probs.argmax()
+                            predicted_place_name = pipeline.classes_[predicted_class_index]
+                            confidence = predicted_probs[0][predicted_class_index]
 
-            sel = similar[st.session_state.selected_similar]
-            st.markdown("### 📍 선택한 장소 위치")
-            st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
-            m2 = folium.Map(location=[sel["lat"], sel["lon"]], zoom_start=17)
-            folium.Marker(
-                location=[sel["lat"], sel["lon"]],
-                popup=sel["name"],
-                tooltip=sel["loc"],
-                icon=folium.Icon(color="orange", icon="star", prefix="fa")
-            ).add_to(m2)
-            st_folium(m2, width=800, height=500)
+                            # 예측된 장소 정보 가져오기
+                            df = st.session_state.df
+                            predicted_place_row = df[df['사용장소'] == predicted_place_name]
+                            
+                            if not predicted_place_row.empty:
+                                predicted_place_row = predicted_place_row.iloc[0]
+                                st.session_state.predicted_place_info = {
+                                    "name": predicted_place_row['사용장소'],
+                                    "address": f"서울 {predicted_place_row['구']} (예시 주소)",
+                                    "lat": predicted_place_row['lat'],
+                                    "lon": predicted_place_row['lon'],
+                                    "people_rec": "최대 10명",
+                                    "cost_per_person": predicted_place_row['1인당비용'],
+                                    "category": predicted_place_row['업종 중분류']
+                                }
+
+                                st.markdown(f"#### 🍽️ 추천 맛집: {st.session_state.predicted_place_info['name']}")
+                                st.markdown(f"""
+                                    - 📍 주소: {st.session_state.predicted_place_info['address']}
+                                    - 👥 인원 추천: {st.session_state.predicted_place_info['people_rec']}
+                                    - 💰 인당 예산: {st.session_state.predicted_place_info['cost_per_person']}원 
+                                    - ⭐ 업종: {st.session_state.predicted_place_info['category']}
+                                """)
+                                st.write(f"_(신뢰도: {confidence:.2%})_")
+
+                                # 지도 표시
+                                m = folium.Map(location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']], zoom_start=17)
+                                folium.Marker(
+                                    location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']],
+                                    tooltip=st.session_state.predicted_place_info['name'],
+                                    popup=st.session_state.predicted_place_info['address'],
+                                    icon=folium.Icon(color="red", icon="cutlery", prefix="fa")
+                                ).add_to(m)
+                                st_folium(m, width=1000, height=600, key="predicted_map")
+
+                                st.markdown("### 🔍 비슷한 장소 추천")
+                                # 동일 업종 중분류 및 구 내 비슷한 장소 3개 추천
+                                similar_places_df = df[(df['업종 중분류'] == st.session_state.predicted_place_info['category']) & 
+                                                       (df['구'] == model_input_data['구']) &
+                                                       (df['사용장소'] != st.session_state.predicted_place_info['name'])]
+                                
+                                num_similars = min(3, len(similar_places_df))
+                                if num_similars > 0:
+                                    st.session_state.similar_places_info = similar_places_df.sample(n=num_similars).to_dict(orient='records')
+                                else:
+                                    st.session_state.similar_places_info = []
+
+                                sim_cols = st.columns(3)
+                                if st.session_state.similar_places_info:
+                                    for i, sim_place in enumerate(st.session_state.similar_places_info):
+                                        selected = (st.session_state.selected_similar == i)
+                                        background = "#ffe6e6" if selected else "#f9f9f9"
+                                        border = "2px solid #ff4d4d" if selected else "1px solid #ddd"
+                                        with sim_cols[i]:
+                                            if st.button(f"✨ {sim_place['사용장소']}", key=f"sim_{i}"):
+                                                st.session_state.selected_similar = i
+                                                st.rerun()
+                                            st.markdown(f"""
+                                            <div style='border:{border}; border-radius:10px; padding:15px; background-color:{background};'>
+                                                <p style='margin:0;'>📍 {sim_place['구']} (예시 주소)</p>
+                                                <p style='margin:0;'>💰 {sim_place['1인당비용']}원</p>
+                                                <p style='margin:0;'>⭐ {sim_place['업종 중분류']}</p>
+                                            </div>
+                                            """, unsafe_allow_html=True)
+                                else:
+                                    st.info("비슷한 추천 장소를 찾을 수 없습니다.")
+
+                                if st.session_state.selected_similar is not None and st.session_state.similar_places_info:
+                                    sel = st.session_state.similar_places_info[st.session_state.selected_similar]
+                                    st.markdown("### 📍 선택한 장소 위치")
+                                    st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
+                                    m2 = folium.Map(location=[sel["lat"], sel["lon"]], zoom_start=17)
+                                    folium.Marker(
+                                        location=[sel["lat"], sel["lon"]],
+                                        popup=sel["사용장소"],
+                                        tooltip=f"{sel['사용장소']} ({sel['구']})",
+                                        icon=folium.Icon(color="orange", icon="star", prefix="fa")
+                                    ).add_to(m2)
+                                    st_folium(m2, width=800, height=500, key="similar_map_display")
+                            else:
+                                st.warning(f"예측된 장소 '{predicted_place_name}'에 대한 상세 정보를 찾을 수 없습니다.")
+
+                        except Exception as ml_e:
+                            st.error(f"ML 모델 예측 중 오류 발생: {ml_e}")
+
+            except json.JSONDecodeError:
+                st.error("❌ LLM 출력 JSON 파싱 오류. 다시 질문해주세요.")
+            except Exception as e:
+                st.error(f"⚠️ API 호출 또는 처리 중 오류 발생: {e}. 다시 질문해주세요.")
 
         st.markdown("""
         <div style="text-align: right; margin-top: 20px;">
@@ -167,7 +418,7 @@ if menu == "홈":
         </div>
         """, unsafe_allow_html=True)
 
-# === 메뉴결정 ===
+# === 메뉴결정 (기존 코드 유지) ===
 elif menu == "메뉴결정":
     st.title("🍱 공무원 현지 맛집 추천")
     if st.session_state.show_input:
@@ -247,11 +498,12 @@ elif menu == "메뉴결정":
 
         if st.button("🔄 검색 조건 다시 입력하기"):
             st.session_state.show_input = True
+            st.rerun()
 
 # === 지도 보기 ===
 elif menu == "지도 보기":
     st.title("🗺️ 현재 위치 보기")
-    current_location = [37.5665, 126.9780]
+    current_location = [37.5665, 126.9780] # 서울 시청 기준
     m = folium.Map(location=current_location, zoom_start=13)
     folium.Marker(
         location=current_location,
@@ -264,7 +516,9 @@ elif menu == "지도 보기":
 elif menu == "이용 가이드":
     st.title("📘 이용 가이드")
     st.markdown("""
-    1. 좌측 메뉴에서 참고 질문 선택  
-    2. 조건 입력 후 '질문하기' 또는 '맛집 추천 검색' 클릭  
-    3. 추천된 장소 확인 + 지도 시각화  
+    1. 좌측 메뉴에서 '홈' 선택 ➡️ 챗봇을 통해 자유롭게 질문하여 추천받기
+    2. 좌측 메뉴에서 '메뉴결정' 선택 ➡️ 정해진 조건으로 세부적인 맛집 추천받기
+    3. '지도 보기'에서 현재 설정된 기본 위치 확인
+    4. 추천된 장소의 정보와 지도 시각화를 통해 결정하기
     """)
+
