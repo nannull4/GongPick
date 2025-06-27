@@ -22,7 +22,7 @@ st.set_page_config(page_title="공무원 맛집 추천 시스템", layout="wide"
 def load_resources():
     try:
         # 환경변수 기반 경로 우선, 없으면 기본 경로 사용
-        model_path = MODEL_PATH if MODEL_PATH.exists() else Path("ML_model.pkl")
+        model_path = MODEL_PATH if MODEL_PATH.exists() else BASE_DIR / "outputs" / "gongpick.pkl"
         model = joblib.load(model_path)
         
         # 원본 데이터 로드 (있는 경우)
@@ -530,7 +530,7 @@ if menu == "홈":
 
 # === 메뉴결정 ===
 elif menu == "메뉴결정":
-    st.title("🍱 공무원 현지 맛집 추천")
+    st.title("🍱 공무원 로컬 맛집 추천")
     if st.session_state.show_input:
         with st.form("input_form"):
             st.subheader("🔍 지금 가장 중요한 회의는 메뉴 결정입니다 👔🍽️")
@@ -585,25 +585,31 @@ elif menu == "메뉴결정":
                 lat, lon = 37.5665, 126.9780      # 위·경도 없으면 서울 시청 기준
         else:
             lat, lon = 37.5665, 126.9780
- 
-        m = folium.Map(location=[lat, lon], zoom_start=15)
-        folium.Marker([lat, lon],
-                    popup=q["pred_place"],
-                    tooltip=f"{q['pred_place']} ({q['pred_conf']:.0%})",
-                    icon=folium.Icon(color="red")).add_to(m)
-        m_html = m.get_root().render()
-        components.html(m_html, height=500, width=800)
+
+        # 지도 + 상세 정보 나란히 표시
+        col1, col2 = st.columns([1, 1.3])
  
  
         # ── 상세 정보 ──
-        st.markdown(f"""
-        ### 🍽 추천 맛집: **{q['pred_place']}**
-        - 📍 구: {q['구']}
-        - 👥 인원: {q['인원']}
-        - 💰 1인당 비용: {q['1인당비용']}원
-        - ⏰ {q['계절']} · {q['점저']}
-        - ⭐ 업종: {q['업종 중분류']}
-        """)
+        with col1:    
+            st.markdown(f"""
+            ### 🍽 추천 맛집: **{q['pred_place']}**
+            - 📍 구: {q['구']}
+            - 👥 인원: {q['인원']}
+            - 💰 1인당 비용: {q['1인당비용']}원
+            - ☀️ 계절: {q['계절']}
+            - ⏰ 점심 / 저녁:  {q['점저']}
+            - ⭐ 업종: {q['업종 중분류']}
+            """)
+        
+        with col2:
+            m = folium.Map(location=[lat, lon], zoom_start=15)
+            folium.Marker([lat, lon],
+                        popup=q["pred_place"],
+                        tooltip=f"{q['pred_place']} ({q['pred_conf']:.0%})",
+                        icon=folium.Icon(color="red")).add_to(m)
+            m_html = m.get_root().render()
+            components.html(m_html, height=400, width=600)
  
         # ── 유사 장소 ──
         if q["sim_places"]:
