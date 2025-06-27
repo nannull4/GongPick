@@ -7,7 +7,7 @@ import os, joblib, pandas as pd
 from dotenv import load_dotenv 
 from openai import AzureOpenAI
 import json
-
+import streamlit.components.v1 as components
 # 환경변수 로드
 load_dotenv()
 
@@ -57,7 +57,7 @@ try:
         azure_endpoint=azure_openai_endpoint,
         api_version=azure_openai_api_version
     )
-    st.success("Azure OpenAI 클라이언트가 성공적으로 초기화되었습니다.")
+    # st.success("Azure OpenAI 클라이언트가 성공적으로 초기화되었습니다.")
 except Exception as e:
     st.error(f"Azure OpenAI 클라이언트 초기화 오류: {e}")
     st.stop()
@@ -220,35 +220,128 @@ if menu == "홈":
     st.markdown("<div id='top'></div>", unsafe_allow_html=True)
 
     if not st.session_state.show_response:
+        # --- Custom CSS for styling ---
         st.markdown("""
-            <div style='text-align: center; margin-top: 30px;'>
-                <img src='https://img.icons8.com/fluency/96/000000/chat.png' width='72'/>
-                <h1 style='font-weight: bold; font-size: 50px; margin-bottom: 0;'>Gong bot</h1>
-                <p style='color: gray; font-size: 20px;'>🚀 배는 고픈데 결정은 못하겠다면? Gong bot 부르세요!</p>
+            <style>
+                /* Hero Section */
+                .hero-section {
+                    padding: 3rem 1rem;
+                    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                    border-radius: 15px;
+                    text-align: center;
+                    margin-bottom: 2.5rem;
+                }
+                .hero-section h1 {
+                    font-weight: 900;
+                    font-size: 3.5rem;
+                    color: #1e3a8a; /* Deep Blue */
+                    margin-bottom: 0.5rem;
+                    letter-spacing: -2px;
+                }
+                .hero-section p {
+                    color: #3e4c59;
+                    font-size: 1.2rem;
+                    max-width: 650px;
+                    margin: auto;
+                }
+
+                /* Example Questions Section */
+                .examples-section h2 {
+                    color: #1e3a8a;
+                    font-weight: bold;
+                    text-align: center;
+                    margin-bottom: 1.5rem;
+                }
+
+                /* Style for the cards to ensure uniform height */
+                .example-card {
+                    height: 100%;
+                    border: 1px solid #EAECEF; /* Add border here */
+                    border-radius: 15px;
+                    padding: 15px; /* Add padding here */
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.05); /* Add shadow here */
+                    transition: all 0.2s ease-in-out; /* Add transition for hover */
+                }
+                .example-card:hover {
+                    transform: translateY(-3px); /* Lift effect on hover */
+                    box-shadow: 0 6px 15px rgba(0,0,0,0.08); /* Stronger shadow on hover */
+                }
+                .example-card > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
+                    height: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                }
+
+                /* Chat Input Form */
+                .stForm {
+                    background-color: #FFFFFF;
+                    padding: 2rem 2rem 1rem 2rem;
+                    border-radius: 15px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                    margin-top: 2rem;
+                }
+                .stForm [data-testid="stFormSubmitButton"] button {
+                    width: 100%;
+                    background-color: #16a34a; /* Green-600 */
+                    font-size: 1.1rem;
+                    font-weight: bold;
+                }
+                .stForm [data-testid="stFormSubmitButton"] button:hover {
+                    background-color: #15803d; /* Green-700 */
+                }
+                .similar-places-heading {
+                    margin-top: 2.5rem; /* Spacing from the map */
+                    margin-bottom: 1.5rem;
+                    color: #1e3a8a;
+                    font-weight: bold;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+
+        # --- Hero Section ---
+        st.markdown("""
+            <div class='hero-section'>
+                <h1>Gong-Bot 🤖</h1>
+                <p><strong>🍕배는 고픈데 결정은 못하겠다면❓ Gong bot 부르세요</strong><br>
+                간단하게 질문하거나 아래 예시를 눌러보세요‼️</p>
             </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("#### 👇 아래 질문을 선택하거나 직접 입력해보세요!")
+        # --- Example Questions ---
+        with st.container():
+            st.markdown("<div class='examples-section'><h2>✨ 이렇게 물어보세요!</h2></div>", unsafe_allow_html=True)
+            
+            example_questions = [
+                (" 점심 회식 💼", "마포구에서 점심 먹을 건데 추천해줘 인당 12000"),
+                (" 저녁 회식 🍻", "8명이 저녁에 회식할 건데 중식집으로 부탁해"),
+                (" 데이트 ❤️", "여자친구랑 데이트 갈건데 중식집으로 추천해줘") # Added back
+            ]
+            
+            cols = st.columns(3) # Changed back to 3
+            for i, col in enumerate(cols):
+                with col:
+                    with st.container(): # Removed border=True
+                        st.markdown(f"<h4 style='text-align: center;'>{example_questions[i][0]}</h4>", unsafe_allow_html=True)
+                        if st.button(f"{example_questions[i][1]}", key=f"ex_{i}", use_container_width=True):
+                            st.session_state.chat_input = example_questions[i][1]
+                            st.session_state.show_response = False # Ensure response section is hidden
+                            # Clear previous results when an example is clicked
+                            st.session_state.predicted_place_info = {}
+                            st.session_state.similar_places_info = []
+                            st.session_state.llm_parsed_data = {}
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-        example_questions = [
-            "마포구에서 점심 먹을 건데 추천해줘 인당 12000원",
-            "8명이 저녁에 회식할 건데 중식집으로 부탁해",
-            "중구에서 여자친구랑 저녁 먹을만한 양식당 알려줘"
-        ]
-        cols = st.columns(3)
-        for i, col in enumerate(cols):
-            if col.button(f"💬 {example_questions[i]}", key=f"ex_{i}"):
-                st.session_state.chat_input = example_questions[i]
-
+        # --- Chat Input Form ---
         with st.form("chat_form"):
             user_query = st.text_input(
-                "💬 쫄면이냐, 제육이냐… 오늘도 메뉴 고민 출근 완료 🤯",
+                "💬 **직접 질문하기**",
                 value=st.session_state.chat_input,
-                key="chat_input_box"
+                key="chat_input_box",
+                placeholder="예: 강남에서 3명이서 먹을만한 파스타집 알려줘"
             )
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                submitted = st.form_submit_button("질문하기")
+            
+            submitted = st.form_submit_button("🚀 추천 받기!", use_container_width=True)
 
             if submitted and user_query:
                 st.session_state.last_query = user_query
@@ -339,7 +432,7 @@ if menu == "홈":
                                     
                                     st.session_state.predicted_place_info = {
                                         "name": predicted_place_row['사용장소'],
-                                        "address": f"서울 {predicted_place_row['구']} (예시 주소)",
+                                        "address": f"서울 {predicted_place_row['구']} ",
                                         "lat": lat,
                                         "lon": lon,
                                         "people_rec": "최대 10명",
@@ -390,21 +483,23 @@ if menu == "홈":
             ).add_to(m)
             st_folium(m, width=1000, height=600, key="predicted_map")
 
-            st.markdown("### 🔍 비슷한 장소 추천")
-            sim_cols = st.columns(3)
+            st.markdown("<h3 class='similar-places-heading'>🔍 비슷한 장소 추천</h3>", unsafe_allow_html=True)
+            
             if st.session_state.similar_places_info:
+                sim_cols = st.columns(len(st.session_state.similar_places_info))
                 for i, sim_place in enumerate(st.session_state.similar_places_info):
                     with sim_cols[i]:
-                        if st.button(f"✨ {sim_place['사용장소']}", key=f"sim_{i}"):
-                            st.session_state.selected_similar = i
-                            st.rerun()
-                        st.markdown(f"""
-                        <div style='border:1px solid #ddd; border-radius:10px; padding:15px; background-color:#f9f9f9;'>
-                            <p style='margin:0;'>📍 {sim_place['구']} (예시 주소)</p>
-                            <p style='margin:0;'>💰 {sim_place['1인당비용']}원</p>
-                            <p style='margin:0;'>⭐ {sim_place['업종 중분류']}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with st.container(border=True):
+                            st.markdown(f"""
+                                <div class="similar-card-content">
+                                    <h5 style="font-weight:bold; text-align:center;">{sim_place['사용장소']}</h5>
+                                    <p style="margin:0; text-align:center;">📍 {sim_place['구']}</p>
+                                    <p style="margin:0; text-align:center;">💰 {sim_place['1인당비용']}원</p>
+                                </div>
+                            """, unsafe_allow_html=True)
+                            if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
+                                st.session_state.selected_similar = i
+                                st.rerun()
             else:
                 st.info("비슷한 추천 장소를 찾을 수 없습니다.")
 
@@ -496,12 +591,13 @@ elif menu == "메뉴결정":
                     popup=q["pred_place"],
                     tooltip=f"{q['pred_place']} ({q['pred_conf']:.0%})",
                     icon=folium.Icon(color="red")).add_to(m)
-        st_folium(m, width=800, height=500)
+        m_html = m.get_root().render()
+        components.html(m_html, height=500, width=800)
+ 
  
         # ── 상세 정보 ──
         st.markdown(f"""
         ### 🍽 추천 맛집: **{q['pred_place']}**
-        - 🔮 신뢰도: **{q['pred_conf']:.0%}**
         - 📍 구: {q['구']}
         - 👥 인원: {q['인원']}
         - 💰 1인당 비용: {q['1인당비용']}원
@@ -534,7 +630,7 @@ elif menu == "메뉴결정":
             st.session_state.show_input = True
             st.session_state.selected_similar_menu = None
             st.rerun()
- 
+
 # === 지도 보기 ===
 # elif menu == "지도 보기":
 #     st.title("🗺️ 현재 위치 보기")
