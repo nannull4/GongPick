@@ -589,7 +589,6 @@ elif menu == "메뉴결정":
         # 지도 + 상세 정보 나란히 표시
         col1, col2 = st.columns([1, 1.3])
  
- 
         # ── 상세 정보 ──
         with col1:    
             st.markdown(f"""
@@ -610,26 +609,33 @@ elif menu == "메뉴결정":
                         icon=folium.Icon(color="red")).add_to(m)
             m_html = m.get_root().render()
             components.html(m_html, height=400, width=600)
+
+        st.markdown("---")
+        # st.markdown("<br>", unsafe_allow_html=True)
  
         # ── 유사 장소 ──
         if q["sim_places"]:
-            st.markdown("#### 🔍 비슷한 장소")
-            for i, p in enumerate(q["sim_places"]):
-                if st.button(f"📍 {p}", key=f"sim_menu_{i}"):
-                    st.session_state.selected_similar_menu = p
-                    st.rerun()
 
-        if st.session_state.selected_similar_menu:
-            st.markdown(f"### 🗺️ {st.session_state.selected_similar_menu} 위치")
-            sim_loc_row = raw_df[raw_df["사용장소"] == st.session_state.selected_similar_menu]
-            if not sim_loc_row.empty and {"위도", "경도"}.issubset(sim_loc_row.columns):
-                sim_lat, sim_lon = sim_loc_row.iloc[0]["위도"], sim_loc_row.iloc[0]["경도"]
-            else:
-                sim_lat, sim_lon = 37.5665, 126.9780
+            col1, col2 = st.columns([1, 1.3])
             
-            m2 = folium.Map(location=[sim_lat, sim_lon], zoom_start=15)
-            folium.Marker([sim_lat, sim_lon], popup=st.session_state.selected_similar_menu).add_to(m2)
-            st_folium(m2, width=800, height=500, key="similar_map_menu")
+            with col1:
+                st.markdown("#### 🔍 비슷한 장소")
+                for i, p in enumerate(q["sim_places"]):
+                    if st.button(f"📍 {p}", key=f"sim_menu_{i}"):
+                        st.session_state.selected_similar_menu = p
+                        st.rerun()
+            with col2:
+                if st.session_state.selected_similar_menu:
+                    st.markdown(f"#### 🗺️ {st.session_state.selected_similar_menu} 위치")
+                    sim_loc_row = raw_df[raw_df["사용장소"] == st.session_state.selected_similar_menu]
+                    if not sim_loc_row.empty and {"위도", "경도"}.issubset(sim_loc_row.columns):
+                        sim_lat, sim_lon = sim_loc_row.iloc[0]["위도"], sim_loc_row.iloc[0]["경도"]
+                    else:
+                        sim_lat, sim_lon = 37.5665, 126.9780
+                    
+                    m2 = folium.Map(location=[sim_lat, sim_lon], zoom_start=15)
+                    folium.Marker([sim_lat, sim_lon], popup=st.session_state.selected_similar_menu).add_to(m2)
+                    st_folium(m2, height=400, width=600, key="similar_map_menu")
 
  
         if st.button("🔄 검색 조건 다시 입력하기"):
