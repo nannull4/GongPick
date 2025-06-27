@@ -15,6 +15,9 @@ BASE_DIR   = Path(__file__).resolve().parents[1]      # GongPick/
 MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "outputs" / "gongpick.pkl"))
 RAW_PATH   = Path(os.getenv("RAW_DATA_PATH", BASE_DIR / "data" / "raw" / "프렌차이즈_구추출_결과 1.csv"))
 
+# --- 페이지 설정 ---
+st.set_page_config(page_title="공무원 맛집 추천 시스템", layout="wide")
+
 @st.cache_resource(show_spinner=False)
 def load_resources():
     try:
@@ -176,8 +179,7 @@ if 'df' not in st.session_state:
     else:
         st.session_state.df = initialize_sample_data()
 
-# --- 페이지 설정 ---
-st.set_page_config(page_title="공무원 맛집 추천 시스템", layout="wide")
+
 
 # 초기 세션 상태 설정
 if "chat_input" not in st.session_state:
@@ -198,6 +200,8 @@ if "predicted_place_info" not in st.session_state:
     st.session_state.predicted_place_info = {}
 if "similar_places_info" not in st.session_state:
     st.session_state.similar_places_info = []
+if "selected_similar_menu" not in st.session_state:
+    st.session_state.selected_similar_menu = None
 
 # === 사이드바 ===
 with st.sidebar:
@@ -208,7 +212,8 @@ with st.sidebar:
         st.markdown("### 🍽️ GongPick")
     st.markdown("<p style='color: rgba(128, 144, 182, 1); font-weight: bold;'>공무원들의 믿을만한 Pick!</p>", unsafe_allow_html=True)
     st.markdown("#### 오늘의 업무도 맛있게!")
-    menu = st.radio("📋 메뉴", ["홈", "메뉴결정", "지도 보기", "이용 가이드"], index=0)
+    menu = st.radio("📋 메뉴", ["홈", "메뉴결정"], index=0)
+    # menu = st.radio("📋 메뉴", ["홈", "메뉴결정", "지도 보기", "이용 가이드"], index=0)
 
 # === 홈 (챗봇) ===
 if menu == "홈":
@@ -250,6 +255,10 @@ if menu == "홈":
                 st.session_state.chat_input = user_query
                 st.session_state.selected_similar = None
                 st.session_state.show_response = True
+                # 이전 결과 초기화
+                st.session_state.predicted_place_info = {}
+                st.session_state.similar_places_info = []
+                st.session_state.llm_parsed_data = {}
                 st.rerun()
 
     else: # 질문 제출 후
@@ -261,167 +270,162 @@ if menu == "홈":
         st.markdown("### 💬 답변")
         st.markdown(f"**'{st.session_state.last_query}'에 대한 추천 결과입니다.**")
 
-        # --- LLM 및 ML 모델 로직 ---
-        with st.spinner("LLM으로 정보 추출 및 ML 모델로 추천 맛집 찾는 중..."):
-            try:
-                # LLM Chat Completion 요청
-                response = client.chat.completions.create(
-                    model=your_deployment_name,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": [{"type": "text", "text": system_prompt_content}]
-                        },
-                        {"role": "user", "content": st.session_state.last_query}
-                    ],
-                    max_tokens=200,
-                    response_format={"type": "json_object"}
-                )
+        # --- LLM 및 ML 모델 로직 (결과가 없을 때만 실행) ---
+        if not st.session_state.predicted_place_info:
+            with st.spinner("LLM으로 정보 추출 및 ML 모델로 추천 맛집 찾는 중..."):
+                try:
+                    # LLM Chat Completion 요청
+                    response = client.chat.completions.create(
+                        model=your_deployment_name,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": [{"type": "text", "text": system_prompt_content}]
+                            },
+                            {"role": "user", "content": st.session_state.last_query}
+                        ],
+                        max_tokens=200,
+                        response_format={"type": "json_object"}
+                    )
 
-                llm_output_json_str = response.choices[0].message.content
-                model_input_data = json.loads(llm_output_json_str)
-                st.session_state.llm_parsed_data = model_input_data
+                    llm_output_json_str = response.choices[0].message.content
+                    model_input_data = json.loads(llm_output_json_str)
+                    st.session_state.llm_parsed_data = model_input_data
 
-                # 서비스 미지원 지역 검사
-                extracted_gu = model_input_data.get("구")
+                    # 서비스 미지원 지역 검사
+                    extracted_gu = model_input_data.get("구")
 
-                if extracted_gu and extracted_gu not in valid_korean_districts:
-                    st.error(f"🚨 서비스 미지원 지역입니다: **'{extracted_gu}'**.\n\n"
-                             "대한민국 서울특별시 내의 '구' 단위 지역만 지원됩니다. 다시 질문해주세요.")
-                    st.session_state.predicted_place_info = {}
-                    st.session_state.similar_places_info = []
-                else:
-                    st.success(f"✅ '{extracted_gu}'는 지원되는 지역입니다. ML 모델 예측을 시작합니다.")
-                    
-                    # ML 모델 입력 데이터 준비 및 예측
-                    feature_columns = ["인원", "계절", "점저", "1인당비용", "업종 중분류", "구"]
-                    
-                    if not all(field in model_input_data for field in feature_columns):
-                        st.error("LLM 출력에 ML 모델 예측에 필요한 필수 필드가 누락되었습니다. 다시 질문해주세요.")
-                        st.session_state.predicted_place_info = {}
-                        st.session_state.similar_places_info = []
+                    if extracted_gu and extracted_gu not in valid_korean_districts:
+                        st.error(f"🚨 서비스 미지원 지역입니다: **'{extracted_gu}'**.\n\n"
+                                 "대한민국 서울특별시 내의 '구' 단위 지역만 지원됩니다. 다시 질문해주세요.")
                     else:
-                        # 숫자형 필드 타입 변환
-                        try:
-                            model_input_data["인원"] = int(model_input_data["인원"])
-                            model_input_data["1인당비용"] = int(model_input_data["1인당비용"])
-                        except ValueError:
-                            st.error("LLM이 반환한 '인원' 또는 '1인당비용' 값이 유효한 숫자가 아닙니다. 다시 질문해주세요.")
-                            st.session_state.predicted_place_info = {}
-                            st.session_state.similar_places_info = []
-                            st.stop()
-
-                        # ML 모델에 전달할 DataFrame 생성
-                        example = pd.DataFrame([model_input_data], columns=feature_columns)
+                        st.success(f"✅ '{extracted_gu}'는 지원되는 지역입니다. ML 모델 예측을 시작합니다.")
                         
-                        try:
-                            predicted_probs = pipeline.predict_proba(example)
-                            predicted_class_index = predicted_probs.argmax()
-                            predicted_place_name = pipeline.classes_[predicted_class_index]
-                            confidence = predicted_probs[0][predicted_class_index]
+                        # ML 모델 입력 데이터 준비 및 예측
+                        feature_columns = ["인원", "계절", "점저", "1인당비용", "업종 중분류", "구"]
+                        
+                        if not all(field in model_input_data for field in feature_columns):
+                            st.error("LLM 출력에 ML 모델 예측에 필요한 필수 필드가 누락되었습니다. 다시 질문해주세요.")
+                        else:
+                            # 숫자형 필드 타입 변환
+                            try:
+                                model_input_data["인원"] = int(model_input_data["인원"])
+                                model_input_data["1인당비용"] = int(model_input_data["1인당비용"])
+                            except ValueError:
+                                st.error("LLM이 반환한 '인원' 또는 '1인당비용' 값이 유효한 숫자가 아닙니다. 다시 질문해주세요.")
+                                st.stop()
 
-                            # 예측된 장소 정보 가져오기
-                            df = st.session_state.df
-                            predicted_place_row = df[df['사용장소'] == predicted_place_name]
+                            # ML 모델에 전달할 DataFrame 생성
+                            example = pd.DataFrame([model_input_data], columns=feature_columns)
                             
-                            if not predicted_place_row.empty:
-                                predicted_place_row = predicted_place_row.iloc[0]
-                                # 위경도 정보가 있는지 확인
-                                if 'lat' in predicted_place_row and 'lon' in predicted_place_row:
-                                    lat, lon = predicted_place_row['lat'], predicted_place_row['lon']
-                                else:
-                                    # 기본 위치 설정 (서울 시청)
-                                    lat, lon = 37.5665, 126.9780
+                            try:
+                                predicted_probs = pipeline.predict_proba(example)
+                                predicted_class_index = predicted_probs.argmax()
+                                predicted_place_name = pipeline.classes_[predicted_class_index]
+                                confidence = predicted_probs[0][predicted_class_index]
+
+                                # 예측된 장소 정보 가져오기
+                                df = st.session_state.df
+                                predicted_place_row = df[df['사용장소'] == predicted_place_name]
                                 
-                                st.session_state.predicted_place_info = {
-                                    "name": predicted_place_row['사용장소'],
-                                    "address": f"서울 {predicted_place_row['구']} (예시 주소)",
-                                    "lat": lat,
-                                    "lon": lon,
-                                    "people_rec": "최대 10명",
-                                    "cost_per_person": predicted_place_row['1인당비용'],
-                                    "category": predicted_place_row['업종 중분류']
-                                }
-
-                                st.markdown(f"#### 🍽️ 추천 맛집: {st.session_state.predicted_place_info['name']}")
-                                st.markdown(f"""
-                                    - 📍 주소: {st.session_state.predicted_place_info['address']}
-                                    - 👥 인원 추천: {st.session_state.predicted_place_info['people_rec']}
-                                    - 💰 인당 예산: {st.session_state.predicted_place_info['cost_per_person']}원 
-                                    - ⭐ 업종: {st.session_state.predicted_place_info['category']}
-                                """)
-                                st.write(f"_(신뢰도: {confidence:.2%})_")
-
-                                # 지도 표시
-                                m = folium.Map(location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']], zoom_start=17)
-                                folium.Marker(
-                                    location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']],
-                                    tooltip=st.session_state.predicted_place_info['name'],
-                                    popup=st.session_state.predicted_place_info['address'],
-                                    icon=folium.Icon(color="red", icon="cutlery", prefix="fa")
-                                ).add_to(m)
-                                st_folium(m, width=1000, height=600, key="predicted_map")
-
-                                st.markdown("### 🔍 비슷한 장소 추천")
-                                # 동일 업종 중분류 및 구 내 비슷한 장소 3개 추천
-                                similar_places_df = df[(df['업종 중분류'] == st.session_state.predicted_place_info['category']) & 
-                                                       (df['구'] == model_input_data['구']) &
-                                                       (df['사용장소'] != st.session_state.predicted_place_info['name'])]
-                                
-                                num_similars = min(3, len(similar_places_df))
-                                if num_similars > 0:
-                                    st.session_state.similar_places_info = similar_places_df.sample(n=num_similars).to_dict(orient='records')
-                                else:
-                                    st.session_state.similar_places_info = []
-
-                                sim_cols = st.columns(3)
-                                if st.session_state.similar_places_info:
-                                    for i, sim_place in enumerate(st.session_state.similar_places_info):
-                                        selected = (st.session_state.selected_similar == i)
-                                        background = "#ffe6e6" if selected else "#f9f9f9"
-                                        border = "2px solid #ff4d4d" if selected else "1px solid #ddd"
-                                        with sim_cols[i]:
-                                            if st.button(f"✨ {sim_place['사용장소']}", key=f"sim_{i}"):
-                                                st.session_state.selected_similar = i
-                                                st.rerun()
-                                            st.markdown(f"""
-                                            <div style='border:{border}; border-radius:10px; padding:15px; background-color:{background};'>
-                                                <p style='margin:0;'>📍 {sim_place['구']} (예시 주소)</p>
-                                                <p style='margin:0;'>💰 {sim_place['1인당비용']}원</p>
-                                                <p style='margin:0;'>⭐ {sim_place['업종 중분류']}</p>
-                                            </div>
-                                            """, unsafe_allow_html=True)
-                                else:
-                                    st.info("비슷한 추천 장소를 찾을 수 없습니다.")
-
-                                if st.session_state.selected_similar is not None and st.session_state.similar_places_info:
-                                    sel = st.session_state.similar_places_info[st.session_state.selected_similar]
-                                    st.markdown("### 📍 선택한 장소 위치")
-                                    st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
-                                    # 위경도 정보 확인
-                                    if 'lat' in sel and 'lon' in sel:
-                                        sel_lat, sel_lon = sel["lat"], sel["lon"]
+                                if not predicted_place_row.empty:
+                                    predicted_place_row = predicted_place_row.iloc[0]
+                                    # 위경도 정보가 있는지 확인
+                                    if 'lat' in predicted_place_row and 'lon' in predicted_place_row:
+                                        lat, lon = predicted_place_row['lat'], predicted_place_row['lon']
                                     else:
-                                        sel_lat, sel_lon = 37.5665, 126.9780  # 기본 위치
+                                        # 기본 위치 설정 (서울 시청)
+                                        lat, lon = 37.5665, 126.9780
                                     
-                                    m2 = folium.Map(location=[sel_lat, sel_lon], zoom_start=17)
-                                    folium.Marker(
-                                        location=[sel_lat, sel_lon],
-                                        popup=sel["사용장소"],
-                                        tooltip=f"{sel['사용장소']} ({sel['구']})",
-                                        icon=folium.Icon(color="orange", icon="star", prefix="fa")
-                                    ).add_to(m2)
-                                    st_folium(m2, width=800, height=500, key="similar_map_display")
-                            else:
-                                st.warning(f"예측된 장소 '{predicted_place_name}'에 대한 상세 정보를 찾을 수 없습니다.")
+                                    st.session_state.predicted_place_info = {
+                                        "name": predicted_place_row['사용장소'],
+                                        "address": f"서울 {predicted_place_row['구']} (예시 주소)",
+                                        "lat": lat,
+                                        "lon": lon,
+                                        "people_rec": "최대 10명",
+                                        "cost_per_person": predicted_place_row['1인당비용'],
+                                        "category": predicted_place_row['업종 중분류']
+                                    }
 
-                        except Exception as ml_e:
-                            st.error(f"ML 모델 예측 중 오류 발생: {ml_e}")
+                                    # 동일 업종 중분류 및 구 내 비슷한 장소 3개 추천
+                                    similar_places_df = df[(df['업종 중분류'] == st.session_state.predicted_place_info['category']) & 
+                                                           (df['구'] == model_input_data['구']) &
+                                                           (df['사용장소'] != st.session_state.predicted_place_info['name'])]
+                                    
+                                    num_similars = min(3, len(similar_places_df))
+                                    if num_similars > 0:
+                                        st.session_state.similar_places_info = similar_places_df.sample(n=num_similars).to_dict(orient='records')
+                                    else:
+                                        st.session_state.similar_places_info = []
 
-            except json.JSONDecodeError:
-                st.error("❌ LLM 출력 JSON 파싱 오류. 다시 질문해주세요.")
-            except Exception as e:
-                st.error(f"⚠️ API 호출 또는 처리 중 오류 발생: {e}. 다시 질문해주세요.")
+                                else:
+                                    st.warning(f"예측된 장소 '{predicted_place_name}'에 대한 상세 정보를 찾을 수 없습니다.")
+
+                            except Exception as ml_e:
+                                st.error(f"ML 모델 예측 중 오류 발생: {ml_e}")
+
+                except json.JSONDecodeError:
+                    st.error("❌ LLM 출력 JSON 파싱 오류. 다시 질문해주세요.")
+                except Exception as e:
+                    st.error(f"⚠️ API 호출 또는 처리 중 오류 발생: {e}. 다시 질문해주세요.")
+
+        # --- 결과 표시 (매번 실행) ---
+        if st.session_state.predicted_place_info:
+            st.markdown(f"#### 🍽️ 추천 맛집: {st.session_state.predicted_place_info['name']}")
+            st.markdown(f"""
+                - 📍 주소: {st.session_state.predicted_place_info['address']}
+                - 👥 인원 추천: {st.session_state.predicted_place_info['people_rec']}
+                - 💰 인당 예산: {st.session_state.predicted_place_info['cost_per_person']}원 
+                - ⭐ 업종: {st.session_state.predicted_place_info['category']}
+            """)
+            # st.write(f"_(신뢰도: {confidence:.2%})_") # confidence는 계산 블록 안에 있어 직접 접근 불가
+
+            # 지도 표시
+            m = folium.Map(location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']], zoom_start=17)
+            folium.Marker(
+                location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']],
+                tooltip=st.session_state.predicted_place_info['name'],
+                popup=st.session_state.predicted_place_info['address'],
+                icon=folium.Icon(color="red", icon="cutlery", prefix="fa")
+            ).add_to(m)
+            st_folium(m, width=1000, height=600, key="predicted_map")
+
+            st.markdown("### 🔍 비슷한 장소 추천")
+            sim_cols = st.columns(3)
+            if st.session_state.similar_places_info:
+                for i, sim_place in enumerate(st.session_state.similar_places_info):
+                    with sim_cols[i]:
+                        if st.button(f"✨ {sim_place['사용장소']}", key=f"sim_{i}"):
+                            st.session_state.selected_similar = i
+                            st.rerun()
+                        st.markdown(f"""
+                        <div style='border:1px solid #ddd; border-radius:10px; padding:15px; background-color:#f9f9f9;'>
+                            <p style='margin:0;'>📍 {sim_place['구']} (예시 주소)</p>
+                            <p style='margin:0;'>💰 {sim_place['1인당비용']}원</p>
+                            <p style='margin:0;'>⭐ {sim_place['업종 중분류']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.info("비슷한 추천 장소를 찾을 수 없습니다.")
+
+            if st.session_state.selected_similar is not None and st.session_state.similar_places_info:
+                sel = st.session_state.similar_places_info[st.session_state.selected_similar]
+                st.markdown("### 📍 선택한 장소 위치")
+                st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
+                # 위경도 정보 확인
+                if 'lat' in sel and 'lon' in sel:
+                    sel_lat, sel_lon = sel["lat"], sel["lon"]
+                else:
+                    sel_lat, sel_lon = 37.5665, 126.9780  # 기본 위치
+                
+                m2 = folium.Map(location=[sel_lat, sel_lon], zoom_start=17)
+                folium.Marker(
+                    location=[sel_lat, sel_lon],
+                    popup=sel["사용장소"],
+                    tooltip=f"{sel['사용장소']} ({sel['구']})",
+                    icon=folium.Icon(color="orange", icon="star", prefix="fa")
+                ).add_to(m2)
+                st_folium(m2, width=800, height=500, key="similar_map_display")
 
         st.markdown("""
         <div style="text-align: right; margin-top: 20px;">
@@ -471,6 +475,7 @@ elif menu == "메뉴결정":
                                         "pred_place": place,
                                         "pred_conf": conf,
                                         "sim_places": sim_places}
+                st.rerun()
     else:
         q = st.session_state.query
  
@@ -507,31 +512,48 @@ elif menu == "메뉴결정":
         # ── 유사 장소 ──
         if q["sim_places"]:
             st.markdown("#### 🔍 비슷한 장소")
-            for p in q["sim_places"]:
-                st.write("•", p)
+            for i, p in enumerate(q["sim_places"]):
+                if st.button(f"📍 {p}", key=f"sim_menu_{i}"):
+                    st.session_state.selected_similar_menu = p
+                    st.rerun()
+
+        if st.session_state.selected_similar_menu:
+            st.markdown(f"### 🗺️ {st.session_state.selected_similar_menu} 위치")
+            sim_loc_row = raw_df[raw_df["사용장소"] == st.session_state.selected_similar_menu]
+            if not sim_loc_row.empty and {"위도", "경도"}.issubset(sim_loc_row.columns):
+                sim_lat, sim_lon = sim_loc_row.iloc[0]["위도"], sim_loc_row.iloc[0]["경도"]
+            else:
+                sim_lat, sim_lon = 37.5665, 126.9780
+            
+            m2 = folium.Map(location=[sim_lat, sim_lon], zoom_start=15)
+            folium.Marker([sim_lat, sim_lon], popup=st.session_state.selected_similar_menu).add_to(m2)
+            st_folium(m2, width=800, height=500, key="similar_map_menu")
+
  
         if st.button("🔄 검색 조건 다시 입력하기"):
             st.session_state.show_input = True
+            st.session_state.selected_similar_menu = None
+            st.rerun()
  
 # === 지도 보기 ===
-elif menu == "지도 보기":
-    st.title("🗺️ 현재 위치 보기")
-    current_location = [37.5665, 126.9780]
-    m = folium.Map(location=current_location, zoom_start=13)
-    folium.Marker(
-        location=current_location,
-        tooltip="📌 현재위치 (기본값)",
-        icon=folium.Icon(color="blue", icon="info-sign")
-    ).add_to(m)
-    st_folium(m, width=900, height=550)
+# elif menu == "지도 보기":
+#     st.title("🗺️ 현재 위치 보기")
+#     current_location = [37.5665, 126.9780]
+#     m = folium.Map(location=current_location, zoom_start=13)
+#     folium.Marker(
+#         location=current_location,
+#         tooltip="📌 현재위치 (기본값)",
+#         icon=folium.Icon(color="blue", icon="info-sign")
+#     ).add_to(m)
+#     st_folium(m, width=900, height=550)
  
-# === 이용 가이드 ===
-elif menu == "이용 가이드":
-    st.title("📘 이용 가이드")
-    st.markdown("""
-    1. 좌측 메뉴에서 참고 질문 선택  
-    2. 조건 입력 후 '질문하기' 또는 '맛집 추천 검색' 클릭  
-    3. 추천된 장소 확인 + 지도 시각화  
-    """)
+# # === 이용 가이드 ===
+# elif menu == "이용 가이드":
+#     st.title("📘 이용 가이드")
+#     st.markdown("""
+#     1. 좌측 메뉴에서 참고 질문 선택  
+#     2. 조건 입력 후 '질문하기' 또는 '맛집 추천 검색' 클릭  
+#     3. 추천된 장소 확인 + 지도 시각화  
+#     """)
 
     
