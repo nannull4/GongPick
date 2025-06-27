@@ -207,7 +207,7 @@ if "selected_similar_menu" not in st.session_state:
 with st.sidebar:
     if LOGO_PATH.exists():
         logo = Image.open(LOGO_PATH)     
-        st.image(logo, use_column_width=True)
+        st.image(logo, use_container_width=True)
     else:
         st.markdown("### 🍽️ GongPick")
     st.markdown("<p style='color: rgba(128, 144, 182, 1); font-weight: bold;'>공무원들의 믿을만한 Pick!</p>", unsafe_allow_html=True)
@@ -507,7 +507,7 @@ elif menu == "메뉴결정":
         - 💰 1인당 비용: {q['1인당비용']}원
         - ⏰ {q['계절']} · {q['점저']}
         - ⭐ 업종: {q['업종 중분류']}
-        """)
+        """)``
  
         # ── 유사 장소 ──
         if q["sim_places"]:
