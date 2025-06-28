@@ -490,44 +490,50 @@ if menu == "홈":
                 ).add_to(m)
                 st_folium(m, height=400, width=600, key="predicted_map")
 
-            st.markdown("<h3 class='similar-places-heading'>🔍 비슷한 장소 추천</h3>", unsafe_allow_html=True)
-            
-            if st.session_state.similar_places_info:
-                sim_cols = st.columns(len(st.session_state.similar_places_info))
-                for i, sim_place in enumerate(st.session_state.similar_places_info):
-                    with sim_cols[i]:
-                        with st.container(border=True):
-                            st.markdown(f"""
-                                <div class="similar-card-content">
-                                    <h5 style="font-weight:bold; text-align:center;">{sim_place['사용장소']}</h5>
-                                    <p style="margin:0; text-align:center;">📍 {sim_place['구']}</p>
-                                    <p style="margin:0; text-align:center;">💰 {sim_place['1인당비용']}원</p>
-                                </div>
-                            """, unsafe_allow_html=True)
-                            if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
-                                st.session_state.selected_similar = i
-                                st.rerun()
-            else:
-                st.info("비슷한 추천 장소를 찾을 수 없습니다.")
+            st.markdown("---")
 
-            if st.session_state.selected_similar is not None and st.session_state.similar_places_info:
-                sel = st.session_state.similar_places_info[st.session_state.selected_similar]
-                st.markdown("### 📍 선택한 장소 위치")
-                st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
-                # 위경도 정보 확인
-                if 'lat' in sel and 'lon' in sel:
-                    sel_lat, sel_lon = sel["lat"], sel["lon"]
-                else:
-                    sel_lat, sel_lon = 37.5665, 126.9780  # 기본 위치
+            col1, col2 = st.columns([1, 1.3])
+            
+            with col1:
+                st.markdown("<h3 class='similar-places-heading'>🔍 비슷한 장소 추천</h3>", unsafe_allow_html=True)
                 
-                m2 = folium.Map(location=[sel_lat, sel_lon], zoom_start=17)
-                folium.Marker(
-                    location=[sel_lat, sel_lon],
-                    popup=sel["사용장소"],
-                    tooltip=f"{sel['사용장소']} ({sel['구']})",
-                    icon=folium.Icon(color="orange", icon="star", prefix="fa")
-                ).add_to(m2)
-                st_folium(m2, width=800, height=500, key="similar_map_display")
+                if st.session_state.similar_places_info:
+                    sim_cols = st.columns(len(st.session_state.similar_places_info))
+                    for i, sim_place in enumerate(st.session_state.similar_places_info):
+                        with sim_cols[i]:
+                            with st.container(border=True):
+                                st.markdown(f"""
+                                    <div class="similar-card-content">
+                                        <h5 style="font-weight:bold; text-align:center;">{sim_place['사용장소']}</h5>
+                                        <p style="margin:0; text-align:center;">📍 {sim_place['구']}</p>
+                                        <p style="margin:0; text-align:center;">💰 {sim_place['1인당비용']}원</p>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                                if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
+                                    st.session_state.selected_similar = i
+                                    st.rerun()
+                else:
+                    st.info("비슷한 추천 장소를 찾을 수 없습니다.")
+
+            with col2:
+                if st.session_state.selected_similar is not None and st.session_state.similar_places_info:
+                    sel = st.session_state.similar_places_info[st.session_state.selected_similar]
+                    st.markdown("### 📍 선택한 장소 위치")
+                    st.markdown("<div id='similar_map'></div>", unsafe_allow_html=True)
+                    # 위경도 정보 확인
+                    if 'lat' in sel and 'lon' in sel:
+                        sel_lat, sel_lon = sel["lat"], sel["lon"]
+                    else:
+                        sel_lat, sel_lon = 37.5665, 126.9780  # 기본 위치
+                    
+                    m2 = folium.Map(location=[sel_lat, sel_lon], zoom_start=17)
+                    folium.Marker(
+                        location=[sel_lat, sel_lon],
+                        popup=sel["사용장소"],
+                        tooltip=f"{sel['사용장소']} ({sel['구']})",
+                        icon=folium.Icon(color="orange", icon="star", prefix="fa")
+                    ).add_to(m2)
+                    st_folium(m2, height=400, width=600, key="similar_map_display")
 
         st.markdown("""
         <div style="text-align: right; margin-top: 20px;">
