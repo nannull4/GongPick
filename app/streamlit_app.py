@@ -496,22 +496,20 @@ if menu == "홈":
             
             with col1:
                 st.markdown("<h3 class='similar-places-heading'>🔍 비슷한 장소 추천</h3>", unsafe_allow_html=True)
-                
+
                 if st.session_state.similar_places_info:
-                    sim_cols = st.columns(len(st.session_state.similar_places_info))
                     for i, sim_place in enumerate(st.session_state.similar_places_info):
-                        with sim_cols[i]:
-                            with st.container(border=True):
-                                st.markdown(f"""
-                                    <div class="similar-card-content">
-                                        <h5 style="font-weight:bold; text-align:center;">{sim_place['사용장소']}</h5>
-                                        <p style="margin:0; text-align:center;">📍 {sim_place['구']}</p>
-                                        <p style="margin:0; text-align:center;">💰 {sim_place['1인당비용']}원</p>
-                                    </div>
-                                """, unsafe_allow_html=True)
-                                if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
-                                    st.session_state.selected_similar = i
-                                    st.rerun()
+                        with st.container(border=True):
+                            st.markdown(f"""
+                                <div class="similar-card-content">
+                                    <h5 style="font-weight:bold;">{sim_place['사용장소']}</h5>
+                                <p style="margin:0;">📍 {sim_place['구']}</p>
+                                <p style="margin:0;">💰 {sim_place['1인당비용']}원</p>
+                                </div>
+                            """, unsafe_allow_html=True)
+                            if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
+                                st.session_state.selected_similar = i
+                                st.rerun()
                 else:
                     st.info("비슷한 추천 장소를 찾을 수 없습니다.")
 
