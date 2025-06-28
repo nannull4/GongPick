@@ -355,7 +355,7 @@ if menu == "홈":
                 st.rerun()
 
     else: # 질문 제출 후
-        st.markdown("---")
+        # st.markdown("---")
         if st.button("🔄 다시 질문하기"):
             st.session_state.show_response = False
             st.rerun()
@@ -531,6 +531,14 @@ if menu == "홈":
 # === 메뉴결정 ===
 elif menu == "메뉴결정":
     st.title("🍱 공무원 로컬 맛집 추천")
+
+    # 🔄 검색 조건 다시 입력하기 버튼 (입력화면일 때는 안 보이게)
+    if not st.session_state.show_input:
+        if st.button("🔄 검색 조건 다시 입력하기"):
+            st.session_state.show_input = True
+            st.session_state.selected_similar_menu = None
+            st.rerun()
+
     if st.session_state.show_input:
         with st.form("input_form"):
             st.subheader("🔍 지금 가장 중요한 회의는 메뉴 결정입니다 👔🍽️")
@@ -636,12 +644,6 @@ elif menu == "메뉴결정":
                     m2 = folium.Map(location=[sim_lat, sim_lon], zoom_start=15)
                     folium.Marker([sim_lat, sim_lon], popup=st.session_state.selected_similar_menu).add_to(m2)
                     st_folium(m2, height=400, width=600, key="similar_map_menu")
-
- 
-        if st.button("🔄 검색 조건 다시 입력하기"):
-            st.session_state.show_input = True
-            st.session_state.selected_similar_menu = None
-            st.rerun()
 
 # === 지도 보기 ===
 # elif menu == "지도 보기":
