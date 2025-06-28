@@ -493,25 +493,36 @@ if menu == "홈":
             st.markdown("---")
 
             col1, col2 = st.columns([1, 1.3])
-            
+
             with col1:
-                st.markdown("<h3 class='similar-places-heading'>🔍 비슷한 장소 추천</h3>", unsafe_allow_html=True)
+                st.markdown("### 🔍 비슷한 장소 추천")
 
                 if st.session_state.similar_places_info:
-                    for i, sim_place in enumerate(st.session_state.similar_places_info):
-                        with st.container(border=True):
-                            st.markdown(f"""
-                                <div class="similar-card-content">
-                                    <h5 style="font-weight:bold;">{sim_place['사용장소']}</h5>
-                                <p style="margin:0;">📍 {sim_place['구']}</p>
-                                <p style="margin:0;">💰 {sim_place['1인당비용']}원</p>
-                                </div>
-                            """, unsafe_allow_html=True)
-                            if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
-                                st.session_state.selected_similar = i
-                                st.rerun()
+                    for i, sim in enumerate(st.session_state.similar_places_info):
+
+                        #  왼쪽 여백 · 카드 · 오른쪽 여백  (비율은 취향대로)
+                        card_col, _= st.columns([1.5, 1])   # ← ‘6’ ← 전체의 60 % 정도만 카드로 사용
+
+                        with card_col:
+                            with st.container(border=True):      # 테두리는 이 컨테이너가 담당
+                                st.markdown(
+                                    f"""
+                                    <div style="similar-card-content">
+                                        <h5 style="margin:0 0 6px 0;font-weight:bold;">{sim['사용장소']}</h5>
+                                        <p style="margin:0;">📍 {sim['구']}</p>
+                                        <p style="margin:0;">💰 {sim['1인당비용']}원</p>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+
+                                # 버튼 폭을 카드 폭에만 맞추려면 use_container_width ❌
+                                if st.button("자세히 보기", key=f"sim_{i}", use_container_width=True):
+                                    st.session_state.selected_similar = i
+                                    st.rerun()
                 else:
                     st.info("비슷한 추천 장소를 찾을 수 없습니다.")
+
 
             with col2:
                 if st.session_state.selected_similar is not None and st.session_state.similar_places_info:
