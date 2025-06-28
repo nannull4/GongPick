@@ -464,24 +464,31 @@ if menu == "홈":
 
         # --- 결과 표시 (매번 실행) ---
         if st.session_state.predicted_place_info:
-            st.markdown(f"#### 🍽️ 추천 맛집: {st.session_state.predicted_place_info['name']}")
-            st.markdown(f"""
-                - 📍 주소: {st.session_state.predicted_place_info['address']}
-                - 👥 인원 추천: {st.session_state.predicted_place_info['people_rec']}
-                - 💰 인당 예산: {st.session_state.predicted_place_info['cost_per_person']}원 
-                - ⭐ 업종: {st.session_state.predicted_place_info['category']}
-            """)
-            # st.write(f"_(신뢰도: {confidence:.2%})_") # confidence는 계산 블록 안에 있어 직접 접근 불가
 
-            # 지도 표시
-            m = folium.Map(location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']], zoom_start=17)
-            folium.Marker(
-                location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']],
-                tooltip=st.session_state.predicted_place_info['name'],
-                popup=st.session_state.predicted_place_info['address'],
-                icon=folium.Icon(color="red", icon="cutlery", prefix="fa")
-            ).add_to(m)
-            st_folium(m, width=1000, height=600, key="predicted_map")
+            # 지도 + 상세 정보 나란히 표시
+            col1, col2 = st.columns([1, 1.3])
+    
+            # ── 상세 정보 ──
+            with col1:  
+                st.markdown(f"#### 🍽️ 추천 맛집: {st.session_state.predicted_place_info['name']}")
+                st.markdown(f"""
+                    - 📍 주소: {st.session_state.predicted_place_info['address']}
+                    - 👥 인원 추천: {st.session_state.predicted_place_info['people_rec']}
+                    - 💰 인당 예산: {st.session_state.predicted_place_info['cost_per_person']}원 
+                    - ⭐ 업종: {st.session_state.predicted_place_info['category']}
+                """)
+                # st.write(f"_(신뢰도: {confidence:.2%})_") # confidence는 계산 블록 안에 있어 직접 접근 불가
+
+            with col2:
+                # 지도 표시
+                m = folium.Map(location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']], zoom_start=17)
+                folium.Marker(
+                    location=[st.session_state.predicted_place_info['lat'], st.session_state.predicted_place_info['lon']],
+                    tooltip=st.session_state.predicted_place_info['name'],
+                    popup=st.session_state.predicted_place_info['address'],
+                    icon=folium.Icon(color="red", icon="cutlery", prefix="fa")
+                ).add_to(m)
+                st_folium(m, height=400, width=600, key="predicted_map")
 
             st.markdown("<h3 class='similar-places-heading'>🔍 비슷한 장소 추천</h3>", unsafe_allow_html=True)
             
