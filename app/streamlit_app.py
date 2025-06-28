@@ -664,7 +664,7 @@ elif menu == "메뉴결정":
                         sim_lat, sim_lon = 37.5665, 126.9780
                     
                     m2 = folium.Map(location=[sim_lat, sim_lon], zoom_start=15)
-                    folium.Marker([sim_lat, sim_lon], popup=st.session_state.selected_similar_menu).add_to(m2)
+                    folium.Marker([sim_lat, sim_lon], popup=st.session_state.selected_similar_menu, tooltip=st.session_state.selected_similar_menu).add_to(m2)
                     st_folium(m2, height=400, width=600, key="similar_map_menu")
 
 # === 지도 보기 ===
